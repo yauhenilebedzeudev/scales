@@ -274,6 +274,50 @@
   /* ── состояние ── */
   const state = { keyPc: 9, mode: "minor", box: 0, lbl: "notes", system: "pent" };
 
+  /* ── хранилище ──
+     STORE_VERSION — версия схемы сохранённых данных. При ломающих правках
+     увеличь число: всё сохранённое со старой версией будет молча удалено,
+     и пользователь получит страницу с настройками по умолчанию, а не сломанную. */
+  const STORE_KEY = "scales-trainer";
+  const STORE_VERSION = 1;
+  const saved = { bpm: 80, easy: false, task: null };   // то, что не входит в state
+  const ALLOWED = {
+    system:["pent","blues","caged"], mode:["minor","major"],
+    lbl:["notes","degrees","none"], box:[0,1,2,3,4,5]
+  };
+  function loadStore(){
+    let raw;
+    try{ raw = localStorage.getItem(STORE_KEY); }catch(e){ return; }
+    if(!raw) return;
+    let d;
+    try{ d = JSON.parse(raw); }catch(e){ d = null; }
+    if(!d || d.v !== STORE_VERSION){
+      try{ localStorage.removeItem(STORE_KEY); }catch(e){}
+      return;
+    }
+    // каждое поле принимаем только если оно валидно — иначе остаётся дефолт
+    if(ALLOWED.system.includes(d.system)) state.system = d.system;
+    if(ALLOWED.mode.includes(d.mode))     state.mode   = d.mode;
+    if(ALLOWED.lbl.includes(d.lbl))       state.lbl    = d.lbl;
+    if(ALLOWED.box.includes(d.box))       state.box    = d.box;
+    if(Number.isInteger(d.keyPc) && d.keyPc>=0 && d.keyPc<12) state.keyPc = d.keyPc;
+    if(Number.isInteger(d.bpm) && d.bpm>=40 && d.bpm<=200)     saved.bpm  = d.bpm;
+    if(typeof d.easy === "boolean") saved.easy = d.easy;
+    if(d.task && Number.isInteger(d.task.pc) && ALLOWED.mode.includes(d.task.mode)
+       && ALLOWED.box.includes(d.task.box) && typeof d.task.pat === "string")
+      saved.task = { pc:d.task.pc, mode:d.task.mode, box:d.task.box, pat:d.task.pat };
+  }
+  function saveStore(){
+    try{
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        v: STORE_VERSION,
+        system: state.system, keyPc: state.keyPc, mode: state.mode, box: state.box, lbl: state.lbl,
+        bpm: saved.bpm, easy: saved.easy, task: saved.task
+      }));
+    }catch(e){ /* приватный режим или заполненное хранилище — просто не сохраняем */ }
+  }
+  loadStore();
+
   /* набор ступеней текущей гаммы (pitch classes) */
   function scalePcs(){
     const sets = {
@@ -501,6 +545,7 @@
     syncBoxLabels();
     syncKeyLabels();
     scrollToBox(occ);
+    saveStore();
   }
 
   /* ── метроном ── */
@@ -510,7 +555,9 @@
   const metBtn=document.getElementById("metBtn");
   const beatEls=[...document.querySelectorAll("#beats .beat")];
 
+  bpmRange.value = saved.bpm; bpmNum.textContent = saved.bpm;
   bpmRange.addEventListener("input",()=>{ bpmNum.textContent=bpmRange.value; });
+  bpmRange.addEventListener("change",()=>{ saved.bpm=+bpmRange.value; saveStore(); });
 
   function click(time, accent){
     const osc=ac.createOscillator(), g=ac.createGain();
@@ -641,13 +688,22 @@
     "Descending Only",
     "Up This Box, Down the Next"
   ];
-  let easyMode=false;
+  let easyMode=saved.easy;
   const taskCard=document.getElementById("taskCard");
   const easyBtn=document.getElementById("taskEasy");
+  const syncEasy=()=>{ easyBtn.textContent = easyMode ? "All Boxes" : "Boxes 1·2·5"; };
+  syncEasy();
   easyBtn.addEventListener("click",()=>{
-    easyMode=!easyMode;
-    easyBtn.textContent = easyMode ? "All Boxes" : "Boxes 1·2·5";
+    easyMode=!easyMode; syncEasy();
+    saved.easy=easyMode; saveStore();
   });
+  function showTask(t){
+    taskCard.classList.remove("empty");
+    const where = state.system==="caged" ? `${shapeName(t.mode,t.box)} Shape` : `Box ${t.box}`;
+    taskCard.innerHTML =
+      `<div class="t-main"><span class="hl">${noteName(t.pc)} ${t.mode==="minor"?"Minor":"Major"}</span> · ${where}</div>
+       <div class="t-pat">${t.pat}</div>`;
+  }
   document.getElementById("taskBtn").addEventListener("click",()=>{
     const pc=Math.floor(Math.random()*12);
     const mode=Math.random()<0.5?"minor":"major";
@@ -656,13 +712,11 @@
     const pat=PATTERNS[Math.floor(Math.random()*PATTERNS.length)];
     state.keyPc=pc; state.mode=mode; state.box=box;
     syncSeg(keySeg,"pc",pc); syncSeg(modeSeg,"mode",mode); syncSeg(boxSeg,"box",box);
-    render();
-    taskCard.classList.remove("empty");
-    const where = state.system==="caged" ? `${shapeName(mode,box)} Shape` : `Box ${box}`;
-    taskCard.innerHTML =
-      `<div class="t-main"><span class="hl">${noteName(pc)} ${mode==="minor"?"Minor":"Major"}</span> · ${where}</div>
-       <div class="t-pat">${pat}</div>`;
+    saved.task={pc,mode,box,pat};
+    render();                                   // render() же и сохраняет
+    showTask(saved.task);
   });
+  if(saved.task) showTask(saved.task);
 
   /* ── прокрутка грифа к выбранному боксу (мобильный) ── */
   const wrap=document.getElementById("boardWrap"), inner=document.getElementById("boardInner");
@@ -690,6 +744,11 @@
   bpmRange.addEventListener("input",mirror);
   mirror();
 
+  /* восстановленное состояние → чипы, затем первый рендер */
+  syncSeg(sysSeg,"sys",state.system);
+  syncSeg(modeSeg,"mode",state.mode);
+  syncSeg(boxSeg,"box",state.box);
+  syncSeg(lblSeg,"lbl",state.lbl);
   render();
 })();
 </script>
