@@ -160,7 +160,7 @@
       </div>
     </div>
     <div class="row">
-      <span class="lbl">Box</span>
+      <span class="lbl" id="boxLbl">Box</span>
       <div class="seg" id="boxSeg">
         <button class="chip" data-box="0" aria-pressed="true">All</button>
         <button class="chip" data-box="1" aria-pressed="false">1</button>
@@ -235,6 +235,12 @@
 
   /* ── музыкальные данные ── */
   const NOTES = ["C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","B"];
+  const NOTES_FLAT = ["C","D♭","D","E♭","E","F","G♭","G","A♭","A","B♭","B"];
+  // тональности, которые пишутся через бемоли (по знакам в ключе)
+  const FLAT_KEYS = { minor:[0,2,3,5,7,10], major:[1,3,5,8,10] };
+  const useFlats = () => FLAT_KEYS[state.mode].includes(state.keyPc);
+  const noteName = (pc, forceFlat=false) => (forceFlat||useFlats()) ? NOTES_FLAT[pc] : NOTES[pc];
+  const keyName  = pc => FLAT_KEYS[state.mode].includes(pc) ? NOTES_FLAT[pc] : NOTES[pc];
   const OPEN  = [4,9,2,7,11,4];              // струны 6→1: E A D G B e (pitch class)
   const NUM_FRETS = 17;
 
@@ -259,6 +265,11 @@
   const BLUES_MAJOR = [0,2,3,4,7,9];             // пентатоника + ♭3
   const BLUES_MINOR_IVL = {0:"1",3:"♭3",5:"4",6:"♭5",7:"5",10:"♭7"};
   const BLUES_MAJOR_IVL = {0:"1",2:"2",3:"♭3",4:"3",7:"5",9:"6"};
+  // CAGED: тоны трезвучия тоники (1–3–5 / 1–♭3–5) и имена форм по позициям
+  const CHORD_MINOR = [0,3,7];
+  const CHORD_MAJOR = [0,4,7];
+  const CAGED_SHAPES = { major:["E","D","C","A","G"], minor:["Em","Dm","Cm","Am","Gm"] };
+  const shapeName = (mode,box) => CAGED_SHAPES[mode][box-1];
 
   /* ── состояние ── */
   const state = { keyPc: 9, mode: "minor", box: 0, lbl: "notes", system: "pent" };
@@ -276,7 +287,7 @@
     return (state.mode==="minor"?MINOR_SET:MAJOR_SET).map(i=>(state.keyPc+i)%12);
   }
 
-  /* ──控 сегменты-кнопки ── */
+  /* ── сегменты-кнопки ── */
   const keySeg = document.getElementById("keySeg");
   NOTES.forEach((n,pc)=>{
     const b=document.createElement("button");
@@ -308,16 +319,29 @@
     const b=e.target.closest("button"); if(!b)return;
     state.system=b.dataset.sys; syncSeg(sysSeg,"sys",state.system); render();
   });
+  /* подписи чипов тональности: C♯ или D♭ в зависимости от лада */
+  function syncKeyLabels(){
+    keySeg.querySelectorAll("button").forEach(b=>{ b.textContent = keyName(+b.dataset.pc); });
+  }
+  /* подписи чипов бокса: в CAGED — имена форм, иначе номера */
+  function syncBoxLabels(){
+    document.getElementById("boxLbl").textContent = state.system==="caged" ? "Shape" : "Box";
+    boxSeg.querySelectorAll("button").forEach(b=>{
+      const n=+b.dataset.box; if(!n) return;
+      b.textContent = state.system==="caged" ? shapeName(state.mode,n) : String(n);
+    });
+  }
 
   /* ── геометрия грифа ── */
-  const M_L=54, M_T=30, FS=58, SS=34;         // отступы, шаг ладов, шаг струн
+  const M_L=80, M_T=30, FS=58, SS=34;         // отступы, шаг ладов, шаг струн
+  const LBL_X=16, OPEN_X=M_L-30;              // подписи струн и центр открытых нот — не пересекаются
   const W = M_L + FS*NUM_FRETS + 46;
   const H = M_T + SS*5 + 58;
   const svg = document.getElementById("board");
   svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
   svg.setAttribute("width","100%");
 
-  const fx = f => f===0 ? M_L-26 : M_L + FS*(f-1) + FS/2;   // центр «клетки» лада
+  const fx = f => f===0 ? OPEN_X : M_L + FS*(f-1) + FS/2;   // центр «клетки» лада
   const fretLine = f => M_L + FS*f;
   const sy = row => M_T + SS*row;                            // row 0 = высокая e
 
@@ -391,7 +415,7 @@
     if(occ) occ.forEach(cells=>{
       const frets = cells.map(c=>c.fret);
       const lo=Math.min(...frets), hi=Math.max(...frets);
-      const x1 = lo===0 ? M_L-38 : fretLine(lo-1)+3;
+      const x1 = lo===0 ? OPEN_X-17 : fretLine(lo-1)+3;
       const x2 = fretLine(hi)-1;
       svg.appendChild(el("rect",{x:x1,y:M_T-16,width:x2-x1,height:SS*5+32,
         fill:"var(--accent)",opacity:.08}));
@@ -406,7 +430,7 @@
       const y=sy(row);
       svg.appendChild(el("line",{x1:M_L-4,y1:y,x2:fretLine(NUM_FRETS),y2:y,
         stroke:"var(--string)","stroke-width":0.8+row*0.35}));
-      const t=el("text",{x:14,y:y+5,"font-size":"14",fill:"var(--muted)"});
+      const t=el("text",{x:LBL_X,y:y+5,"font-size":"14",fill:"var(--muted)","text-anchor":"middle"});
       t.textContent=stringNames[row]; svg.appendChild(t);
     }
 
@@ -417,6 +441,8 @@
     }
 
     /* ноты */
+    const isCaged = state.system==="caged";
+    const chordSet = (state.mode==="minor"?CHORD_MINOR:CHORD_MAJOR).map(i=>(tonic+i)%12);
     for(let row=0;row<6;row++){
       const strIdx = 5-row;                 // 0=6-я(E) ... 5=1-я(e)
       const openPc = OPEN[strIdx];
@@ -424,19 +450,25 @@
         const pc=(openPc+f)%12;
         if(!scaleSet.includes(pc)) continue;
         const isRoot = pc===tonic;
-        const isAdded = state.system!=="pent" && !pentSet.includes(pc);
-        const addFill = state.system==="blues" ? "var(--blue-note)" : "var(--added)";
-        const dotText = (isRoot||isAdded) ? "#ffffff" : "var(--note-text)";
+        // CAGED: выделяем тоны аккорда (форму), остальные ступени — фон;
+        // блюз: выделяем blue note
+        const isChord = isCaged && !isRoot && chordSet.includes(pc);
+        const isBlue  = state.system==="blues" && !pentSet.includes(pc);
+        const isHl = isChord || isBlue;
+        const dotText = (isRoot||isHl) ? "#ffffff" : "var(--note-text)";
         const active = inBox(strIdx,f);
         const g=el("g",{opacity:active?1:.16,
           "data-s":strIdx,"data-f":f,"data-pc":pc});
         const cx=fx(f), cy=sy(row);
         g.appendChild(el("circle",{cx,cy,r:12.5,
-          fill:isRoot?"var(--root)":(isAdded?addFill:"var(--note)")}));
+          fill:isRoot?"var(--root)":(isHl?"var(--blue-note)":"var(--note)")}));
+        if(isCaged && (isRoot||isChord) && active)
+          g.appendChild(el("circle",{cx,cy,r:15.5,fill:"none",
+            stroke:isRoot?"var(--root)":"var(--blue-note)","stroke-width":1.5,"stroke-opacity":.55}));
         if(state.lbl!=="none"){
           const t=el("text",{x:cx,y:cy+4.5,"font-size":"11.5","text-anchor":"middle",
-            fill:dotText,"font-weight":isRoot?"600":"500"});
-          t.textContent = state.lbl==="notes" ? NOTES[pc] : ivlMap[(pc-tonic+12)%12];
+            fill:dotText,"font-weight":(isRoot||isChord)?"600":"500"});
+          t.textContent = state.lbl==="notes" ? noteName(pc, isBlue) : ivlMap[(pc-tonic+12)%12];
           g.appendChild(t);
         }
         svg.appendChild(g);
@@ -450,22 +482,24 @@
       caged: state.mode==="minor"?"Natural Minor":"Major Scale"
     };
     const boxName = state.box===0 ? "Whole Neck"
-      : (state.system==="caged" ? "Position "+state.box : "Box "+state.box);
-    const relKey = state.mode==="minor" ? NOTES[(tonic+3)%12] : NOTES[(tonic+9)%12];
+      : (state.system==="caged" ? `Position ${state.box}, ${shapeName(state.mode,state.box)} Shape` : "Box "+state.box);
+    const relKey = noteName(state.mode==="minor" ? (tonic+3)%12 : (tonic+9)%12);
     const relName = {
       pent:  state.mode==="minor"?"Major Pentatonic":"Minor Pentatonic",
       blues: state.mode==="minor"?"Major Blues":"Minor Blues",
       caged: state.mode==="minor"?"Major Scale":"Natural Minor"
     }[state.system];
     document.getElementById("capLeft").innerHTML =
-      `<b><span class="root-key">${NOTES[tonic]}</span> ${sysNames[state.system]}</b> — ${boxName}. Same Notes as ${relKey} ${relName}.`;
+      `<b><span class="root-key">${noteName(tonic)}</span> ${sysNames[state.system]}</b> — ${boxName}. Same Notes as ${relKey} ${relName}.`;
     const legends = {
       pent:  `<span style="color:var(--note)">●</span> Pentatonic`,
       blues: `<span style="color:var(--note)">●</span> Pentatonic&nbsp;&nbsp;<span style="color:var(--blue-note)">●</span> Blue Note ${state.mode==="minor"?"♭5":"♭3"}`,
-      caged: `<span style="color:var(--note)">●</span> Pentatonic&nbsp;&nbsp;<span style="color:var(--added)">●</span> Added`
+      caged: `<span style="color:var(--blue-note)">●</span> Chord Tones ${state.mode==="minor"?"♭3·5":"3·5"}&nbsp;&nbsp;<span style="color:var(--note)">●</span> Scale`
     };
     document.getElementById("legend").innerHTML =
       `<span style="color:var(--root)">●</span> Root&nbsp;&nbsp;` + legends[state.system];
+    syncBoxLabels();
+    syncKeyLabels();
     scrollToBox(occ);
   }
 
@@ -624,9 +658,9 @@
     syncSeg(keySeg,"pc",pc); syncSeg(modeSeg,"mode",mode); syncSeg(boxSeg,"box",box);
     render();
     taskCard.classList.remove("empty");
-    const unit = state.system==="caged" ? "Position" : "Box";
+    const where = state.system==="caged" ? `${shapeName(mode,box)} Shape` : `Box ${box}`;
     taskCard.innerHTML =
-      `<div class="t-main"><span class="hl">${NOTES[pc]} ${mode==="minor"?"Minor":"Major"}</span> · ${unit} ${box}</div>
+      `<div class="t-main"><span class="hl">${noteName(pc)} ${mode==="minor"?"Minor":"Major"}</span> · ${where}</div>
        <div class="t-pat">${pat}</div>`;
   });
 
